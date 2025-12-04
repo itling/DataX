@@ -316,6 +316,8 @@ public class DefaultDataHandler implements DataHandler {
         switch (column.getType()) {
             case DATE: {
                 Date value = column.asDate();
+                if (value == null)
+                    return "NULL";
                 switch (timestampPrecision) {
                     case MILLISEC:
                         return "" + (value.getTime());

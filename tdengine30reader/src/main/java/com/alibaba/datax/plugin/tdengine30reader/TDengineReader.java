@@ -136,6 +136,8 @@ public class TDengineReader extends Reader {
         private String endTime;
         private String where;
         private List<String> querySql;
+        private String splitInterval;
+        private boolean reverseTime;
 
         static {
             try {
@@ -168,6 +170,8 @@ public class TDengineReader extends Reader {
             this.where = readerSliceConfig.getString(Key.WHERE, "_c0 > " + Long.MIN_VALUE);
             this.querySql = readerSliceConfig.getList(Key.QUERY_SQL, String.class);
             this.mandatoryEncoding = readerSliceConfig.getString(Key.MANDATORY_ENCODING, "UTF-8");
+            this.splitInterval = readerSliceConfig.getString(Key.SPLIT_INTERVAL);
+            this.reverseTime = readerSliceConfig.getBool(Key.REVERSE_TIME, false);
         }
 
         @Override
@@ -180,23 +184,114 @@ public class TDengineReader extends Reader {
             }
         }
 
+        private long parseSplitInterval(String interval) {
+            if (StringUtils.isBlank(interval)) {
+                return 0;
+            }
+            interval = interval.trim();
+            char unit = interval.charAt(interval.length() - 1);
+            long value = Long.parseLong(interval.substring(0, interval.length() - 1));
+            switch (unit) {
+                case 'd':
+                    return value * 24 * 60 * 60 * 1000;
+                case 'h':
+                    return value * 60 * 60 * 1000;
+                case 'm':
+                    return value * 60 * 1000;
+                case 's':
+                    return value * 1000;
+                default:
+                    throw DataXException.asDataXException(TDengineReaderErrorCode.ILLEGAL_VALUE,
+                            "Invalid splitInterval unit: " + unit + ". Supported units: d(day), h(hour), m(minute), s(second)");
+            }
+        }
+
+        private List<String> splitDateTimeRange(String beginTime, String endTime, String splitInterval, boolean reverse) {
+            List<String> timeRanges = new ArrayList<>();
+            if (StringUtils.isBlank(beginTime) || StringUtils.isBlank(endTime) || StringUtils.isBlank(splitInterval)) {
+                timeRanges.add(beginTime + "," + endTime);
+                return timeRanges;
+            }
+
+            SimpleDateFormat format = new SimpleDateFormat(DATETIME_FORMAT);
+            try {
+                java.util.Date startDate =  format.parse(beginTime);
+                java.util.Date endDate =  format.parse(endTime);
+                long intervalMs = parseSplitInterval(splitInterval);
+
+                if (intervalMs <= 0) {
+                    timeRanges.add(beginTime + "," + endTime);
+                    return timeRanges;
+                }
+
+                if (reverse) {
+                    // Reverse time query: split from endTime to beginTime
+                    long currentTime = endDate.getTime();
+                    long startMs = startDate.getTime();
+
+                    while (currentTime > startMs) {
+                        long prevTime = Math.max(currentTime - intervalMs, startMs);
+                        timeRanges.add(format.format(new Date(prevTime)) + "," + format.format(new Date(currentTime)));
+                        currentTime = prevTime;
+                    }
+                } else {
+                    // Normal time query: split from startTime to endTime
+                    long currentTime = startDate.getTime();
+                    long endMs = endDate.getTime();
+
+                    while (currentTime < endMs) {
+                        long nextTime = Math.min(currentTime + intervalMs, endMs);
+                        timeRanges.add(format.format(new Date(currentTime)) + "," + format.format(new Date(nextTime)));
+                        currentTime = nextTime;
+                    }
+                }
+            } catch (ParseException e) {
+                throw DataXException.asDataXException(TDengineReaderErrorCode.ILLEGAL_VALUE,
+                        "Invalid datetime format: " + e.getMessage(), e);
+            }
+
+            return timeRanges;
+        }
+
         @Override
         public void startRead(RecordSender recordSender) {
             List<String> sqlList = new ArrayList<>();
 
             if (querySql == null || querySql.isEmpty()) {
                 for (String table : tables) {
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
-                    sb.append("where ").append(where);
-                    if (!StringUtils.isBlank(startTime)) {
-                        sb.append(" and _c0 >= '").append(startTime).append("'");
+                    // 如果设置了splitInterval，则拆分时间范围
+                    if (!StringUtils.isBlank(splitInterval) && !StringUtils.isBlank(startTime) && !StringUtils.isBlank(endTime)) {
+                        List<String> timeRanges = splitDateTimeRange(startTime, endTime, splitInterval, reverseTime);
+                        for (String timeRange : timeRanges) {
+                            String[] times = timeRange.split(",");
+                            StringBuilder sb = new StringBuilder();
+                            sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
+                            sb.append("where ").append(where);
+                            sb.append(" and _c0 >= '").append(times[0]).append("'");
+                            sb.append(" and _c0 < '").append(times[1]).append("'");
+                            if (reverseTime) {
+                                sb.append(" order by _c0 desc");
+                            }
+                            String sql = sb.toString().trim();
+                            sqlList.add(sql);
+                        }
+                    } else {
+                        // 不拆分，使用原始时间范围
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
+                        sb.append("where ").append(where);
+                        if (!StringUtils.isBlank(startTime)) {
+                            sb.append(" and _c0 >= '").append(startTime).append("'");
+                        }
+                        if (!StringUtils.isBlank(endTime)) {
+                            sb.append(" and _c0 < '").append(endTime).append("'");
+                        }
+                        if (reverseTime) {
+                            sb.append(" order by _c0 desc");
+                        }
+                        String sql = sb.toString().trim();
+                        sqlList.add(sql);
                     }
-                    if (!StringUtils.isBlank(endTime)) {
-                        sb.append(" and _c0 < '").append(endTime).append("'");
-                    }
-                    String sql = sb.toString().trim();
-                    sqlList.add(sql);
                 }
             } else {
                 sqlList.addAll(querySql);

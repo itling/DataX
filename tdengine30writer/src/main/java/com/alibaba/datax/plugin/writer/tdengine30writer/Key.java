@@ -15,4 +15,6 @@ public class Key {
     public static final String WHERE = "where";
     public static final String QUERY_SQL = "querySql";
     public static final String MANDATORY_ENCODING = "mandatoryEncoding";
+    public static final String SPLIT_INTERVAL = "splitInterval";
+    public static final String REVERSE_TIME = "reverseTime";
 }
