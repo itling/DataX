@@ -138,6 +138,7 @@ public class TDengineReader extends Reader {
         private List<String> querySql;
         private String splitInterval;
         private boolean reverseTime;
+        private int splitSubtable;
 
         static {
             try {
@@ -172,6 +173,7 @@ public class TDengineReader extends Reader {
             this.mandatoryEncoding = readerSliceConfig.getString(Key.MANDATORY_ENCODING, "UTF-8");
             this.splitInterval = readerSliceConfig.getString(Key.SPLIT_INTERVAL);
             this.reverseTime = readerSliceConfig.getBool(Key.REVERSE_TIME, false);
+            this.splitSubtable = readerSliceConfig.getInt(Key.SPLIT_SUBTABLE, 0);
         }
 
         @Override
@@ -204,6 +206,26 @@ public class TDengineReader extends Reader {
                     throw DataXException.asDataXException(TDengineReaderErrorCode.ILLEGAL_VALUE,
                             "Invalid splitInterval unit: " + unit + ". Supported units: d(day), h(hour), m(minute), s(second)");
             }
+        }
+
+        /**
+         * 从超级表中获取所有子表名称
+         * @param superTable 超级表名称
+         * @return 子表名称列表
+         */
+        private List<String> getSubtableNames(String superTable) {
+            List<String> subtableNames = new ArrayList<>();
+            String sql = "select distinct tbname from " + superTable;
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(sql)) {
+                while (rs.next()) {
+                    subtableNames.add(rs.getString(1));
+                }
+            } catch (SQLException e) {
+                throw DataXException.asDataXException(TDengineReaderErrorCode.ILLEGAL_VALUE,
+                        "Failed to get subtable names from super table: " + superTable + " since: " + e.getMessage(), e);
+            }
+            return subtableNames;
         }
 
         private List<String> splitDateTimeRange(String beginTime, String endTime, String splitInterval, boolean reverse) {
@@ -259,38 +281,90 @@ public class TDengineReader extends Reader {
 
             if (querySql == null || querySql.isEmpty()) {
                 for (String table : tables) {
-                    // 如果设置了splitInterval，则拆分时间范围
-                    if (!StringUtils.isBlank(splitInterval) && !StringUtils.isBlank(startTime) && !StringUtils.isBlank(endTime)) {
-                        List<String> timeRanges = splitDateTimeRange(startTime, endTime, splitInterval, reverseTime);
-                        for (String timeRange : timeRanges) {
-                            String[] times = timeRange.split(",");
+                    // 如果设置了splitSubtable，则获取子表名称并分批生成SQL
+                    if (splitSubtable > 0) {
+                        List<String> subtableNames = getSubtableNames(table);
+                        // 将子表名称分批，每批大小为splitSubtable
+                        for (int i = 0; i < subtableNames.size(); i += splitSubtable) {
+                            int end = Math.min(i + splitSubtable, subtableNames.size());
+                            List<String> batchSubtables = subtableNames.subList(i, end);
+                            
+                            // 生成子表in条件
+                            StringBuilder inClause = new StringBuilder("tbname in ('");
+                            inClause.append(StringUtils.join(batchSubtables, "','"));
+                            inClause.append("')");
+                            
+                            // 如果设置了splitInterval，则拆分时间范围
+                            if (!StringUtils.isBlank(splitInterval) && !StringUtils.isBlank(startTime) && !StringUtils.isBlank(endTime)) {
+                                List<String> timeRanges = splitDateTimeRange(startTime, endTime, splitInterval, reverseTime);
+                                for (String timeRange : timeRanges) {
+                                    String[] times = timeRange.split(",");
+                                    StringBuilder sb = new StringBuilder();
+                                    sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
+                                    sb.append("where ").append(where);
+                                    sb.append(" and ").append(inClause);
+                                    sb.append(" and _c0 >= '").append(times[0]).append("'");
+                                    sb.append(" and _c0 < '").append(times[1]).append("'");
+                                    if (reverseTime) {
+                                        sb.append(" order by _c0 desc");
+                                    }
+                                    String sql = sb.toString().trim();
+                                    sqlList.add(sql);
+                                }
+                            } else {
+                                // 不拆分时间范围
+                                StringBuilder sb = new StringBuilder();
+                                sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
+                                sb.append("where ").append(where);
+                                sb.append(" and ").append(inClause);
+                                if (!StringUtils.isBlank(startTime)) {
+                                    sb.append(" and _c0 >= '").append(startTime).append("'");
+                                }
+                                if (!StringUtils.isBlank(endTime)) {
+                                    sb.append(" and _c0 < '").append(endTime).append("'");
+                                }
+                                if (reverseTime) {
+                                    sb.append(" order by _c0 desc");
+                                }
+                                String sql = sb.toString().trim();
+                                sqlList.add(sql);
+                            }
+                        }
+                    } else {
+                        // 不使用子表分批查询
+                        // 如果设置了splitInterval，则拆分时间范围
+                        if (!StringUtils.isBlank(splitInterval) && !StringUtils.isBlank(startTime) && !StringUtils.isBlank(endTime)) {
+                            List<String> timeRanges = splitDateTimeRange(startTime, endTime, splitInterval, reverseTime);
+                            for (String timeRange : timeRanges) {
+                                String[] times = timeRange.split(",");
+                                StringBuilder sb = new StringBuilder();
+                                sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
+                                sb.append("where ").append(where);
+                                sb.append(" and _c0 >= '").append(times[0]).append("'");
+                                sb.append(" and _c0 < '").append(times[1]).append("'");
+                                if (reverseTime) {
+                                    sb.append(" order by _c0 desc");
+                                }
+                                String sql = sb.toString().trim();
+                                sqlList.add(sql);
+                            }
+                        } else {
+                            // 不拆分，使用原始时间范围
                             StringBuilder sb = new StringBuilder();
                             sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
                             sb.append("where ").append(where);
-                            sb.append(" and _c0 >= '").append(times[0]).append("'");
-                            sb.append(" and _c0 < '").append(times[1]).append("'");
+                            if (!StringUtils.isBlank(startTime)) {
+                                sb.append(" and _c0 >= '").append(startTime).append("'");
+                            }
+                            if (!StringUtils.isBlank(endTime)) {
+                                sb.append(" and _c0 < '").append(endTime).append("'");
+                            }
                             if (reverseTime) {
                                 sb.append(" order by _c0 desc");
                             }
                             String sql = sb.toString().trim();
                             sqlList.add(sql);
                         }
-                    } else {
-                        // 不拆分，使用原始时间范围
-                        StringBuilder sb = new StringBuilder();
-                        sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
-                        sb.append("where ").append(where);
-                        if (!StringUtils.isBlank(startTime)) {
-                            sb.append(" and _c0 >= '").append(startTime).append("'");
-                        }
-                        if (!StringUtils.isBlank(endTime)) {
-                            sb.append(" and _c0 < '").append(endTime).append("'");
-                        }
-                        if (reverseTime) {
-                            sb.append(" order by _c0 desc");
-                        }
-                        String sql = sb.toString().trim();
-                        sqlList.add(sql);
                     }
                 }
             } else {

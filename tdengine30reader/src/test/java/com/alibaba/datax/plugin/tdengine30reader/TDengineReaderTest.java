@@ -151,4 +151,53 @@ public class TDengineReaderTest {
         Assert.assertEquals("jdbc:TAOS://master:6030/test", conf1.getString("jdbcUrl"));
     }
 
+    @Test
+    public void taskInit_splitSubtable_case01() {
+        // given
+        TDengineReader.Task task = new TDengineReader.Task();
+        Configuration configuration = Configuration.from("{" +
+                "\"username\": \"root\"," +
+                "\"password\": \"taosdata\"," +
+                "\"jdbcUrl\": \"jdbc:TAOS-RS://master:6041/vehicle_dev\"," +
+                "\"table\": [\"pvt\"]," +
+                "\"column\": [\"ts\",\"temperature\",\"pressure\",\"speed\"]," +
+                "\"where\":\"_c0 > 0\"," +
+                "\"beginDateTime\": \"2025-09-01 00:00:00\"," +
+                "\"endDateTime\": \"2025-10-01 00:00:00\"," +
+                "\"splitSubtable\": 500" +
+                "}");
+        task.setPluginJobConf(configuration);
+
+        // when
+        task.init();
+
+        // assert
+        Configuration conf = task.getPluginJobConf();
+        Assert.assertEquals(500, conf.getInt("splitSubtable", 0).intValue());
+
+    }
+
+    @Test
+    public void taskInit_splitSubtable_case02() {
+        // given
+        TDengineReader.Task task = new TDengineReader.Task();
+        Configuration configuration = Configuration.from("{" +
+                 "\"username\": \"root\"," +
+                 "\"password\": \"taosdata\"," +
+                 "\"jdbcUrl\": \"jdbc:TAOS-RS://master:6041/vehicle_dev\"," +
+                 "\"table\": [\"pvt\"]," +
+                 "\"column\": [\"ts\",\"temperature\",\"pressure\",\"speed\"]," +
+                 "\"where\":\"_c0 > 0\"" +
+                 "}");
+        task.setPluginJobConf(configuration);
+
+        // when
+        task.init();
+
+        // assert
+        Configuration conf = task.getPluginJobConf();
+        // 默认值应为0
+        Assert.assertEquals(0, conf.getInt("splitSubtable", 0).intValue());
+    }
+
 }

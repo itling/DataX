@@ -17,4 +17,5 @@ public class Key {
     public static final String MANDATORY_ENCODING = "mandatoryEncoding";
     public static final String SPLIT_INTERVAL = "splitInterval";
     public static final String REVERSE_TIME = "reverseTime";
+    public static final String SPLIT_SUBTABLE = "splitSubtable";
 }
