@@ -1,7 +1,6 @@
 package com.alibaba.datax.plugin.tdengine30reader;
 
 import com.alibaba.datax.common.element.*;
-import com.alibaba.datax.common.element.Record;
 import com.alibaba.datax.common.exception.DataXException;
 import com.alibaba.datax.common.plugin.RecordSender;
 import com.alibaba.datax.common.spi.Reader;
@@ -285,6 +284,7 @@ public class TDengineReader extends Reader {
                     if (splitSubtable > 0) {
                         List<String> subtableNames = getSubtableNames(table);
                         // 将子表名称分批，每批大小为splitSubtable
+                        LOG.info("splitSubtable is set to {}, will split {} subtable(s) into {} batch(es).", splitSubtable, subtableNames.size(), (subtableNames.size() + splitSubtable - 1) / splitSubtable);
                         for (int i = 0; i < subtableNames.size(); i += splitSubtable) {
                             int end = Math.min(i + splitSubtable, subtableNames.size());
                             List<String> batchSubtables = subtableNames.subList(i, end);
@@ -296,6 +296,7 @@ public class TDengineReader extends Reader {
                             
                             // 如果设置了splitInterval，则拆分时间范围
                             if (!StringUtils.isBlank(splitInterval) && !StringUtils.isBlank(startTime) && !StringUtils.isBlank(endTime)) {
+                                LOG.info("splitInterval is set to {}, will split time range {} - {} into batches. tbname count: {}", splitInterval, startTime, endTime, batchSubtables.size());
                                 List<String> timeRanges = splitDateTimeRange(startTime, endTime, splitInterval, reverseTime);
                                 for (String timeRange : timeRanges) {
                                     String[] times = timeRange.split(",");
@@ -312,6 +313,7 @@ public class TDengineReader extends Reader {
                                     sqlList.add(sql);
                                 }
                             } else {
+                                LOG.info("splitInterval is not set, will query table {} directly with time range {} - {}. tbname count: {}", table, startTime, endTime, batchSubtables.size());
                                 // 不拆分时间范围
                                 StringBuilder sb = new StringBuilder();
                                 sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
@@ -331,9 +333,11 @@ public class TDengineReader extends Reader {
                             }
                         }
                     } else {
+                        LOG.info("splitSubtable is not set, will query table {} directly.", table);
                         // 不使用子表分批查询
                         // 如果设置了splitInterval，则拆分时间范围
                         if (!StringUtils.isBlank(splitInterval) && !StringUtils.isBlank(startTime) && !StringUtils.isBlank(endTime)) {
+                            LOG.info("splitInterval is set to {}, will split time range {} - {} into batches.", splitInterval, startTime, endTime);
                             List<String> timeRanges = splitDateTimeRange(startTime, endTime, splitInterval, reverseTime);
                             for (String timeRange : timeRanges) {
                                 String[] times = timeRange.split(",");
@@ -349,6 +353,7 @@ public class TDengineReader extends Reader {
                                 sqlList.add(sql);
                             }
                         } else {
+                            LOG.info("splitInterval is not set, will query table {} directly with time range {} - {}.", table, startTime, endTime);
                             // 不拆分，使用原始时间范围
                             StringBuilder sb = new StringBuilder();
                             sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
@@ -371,7 +376,14 @@ public class TDengineReader extends Reader {
                 sqlList.addAll(querySql);
             }
 
+            long startTime = System.currentTimeMillis();
+            int currentIndex = 0;
+            int totalSqlCount = sqlList.size();
+            
+            LOG.info("Total SQL to execute: {}", totalSqlCount);
+            
             for (String sql : sqlList) {
+                long sqlStartTime = System.currentTimeMillis();
                 try (Statement stmt = conn.createStatement()) {
                     ResultSet rs = stmt.executeQuery(sql);
                     while (rs.next()) {
@@ -381,7 +393,81 @@ public class TDengineReader extends Reader {
                 } catch (SQLException e) {
                     LOG.error(e.getMessage(), e);
                 }
+                
+                currentIndex++;
+                long currentTime = System.currentTimeMillis();
+                
+                // Print progress for each SQL execution
+                long elapsedSeconds = (currentTime - sqlStartTime) / 1000;
+                long totalElapsedSeconds = (currentTime - startTime) / 1000;
+                double progress = (double) currentIndex / totalSqlCount * 100;
+                
+                // Calculate estimated time to completion
+                long estimatedRemainingSeconds = 0;
+                if (progress > 0 && currentIndex > 0) {
+                    estimatedRemainingSeconds = Math.round((totalElapsedSeconds / progress) * (100 - progress));
+                }
+                
+                // Format the entire log message to ensure correct formatting
+                String logMessage = String.format("SQL execution progress: %d / %d (%.2f%%), Elapsed time: %s, Total Elapsed time: %s, Estimated remaining time: %s", 
+                        currentIndex, totalSqlCount, progress, 
+                        formatDuration(elapsedSeconds), 
+                        formatDuration(totalElapsedSeconds), 
+                        formatDuration(estimatedRemainingSeconds));
+                LOG.info(logMessage);
             }
+            
+            // Print final progress
+            long totalElapsedSeconds = (System.currentTimeMillis() - startTime) / 1000;
+            // Format the entire log message to ensure correct formatting
+            String finalLogMessage = String.format("SQL execution completed: %d / %d (100%%), Total elapsed time: %s", 
+                    totalSqlCount, totalSqlCount, formatDuration(totalElapsedSeconds));
+            LOG.info(finalLogMessage);
+        }
+
+        /**
+         * Format seconds into a human-readable duration string (days, hours, minutes, seconds)
+         * @param seconds Total seconds to format
+         * @return Formatted duration string
+         */
+        private String formatDuration(long seconds) {
+            if (seconds <= 0) {
+                return "0 seconds";
+            }
+            
+            long days = seconds / (24 * 60 * 60);
+            long hours = (seconds % (24 * 60 * 60)) / (60 * 60);
+            long minutes = (seconds % (60 * 60)) / 60;
+            long secs = seconds % 60;
+            
+            StringBuilder duration = new StringBuilder();
+            
+            if (days > 0) {
+                duration.append(days).append(" day").append(days > 1 ? "s" : "");
+            }
+            
+            if (hours > 0 || duration.length() > 0) {
+                if (duration.length() > 0) {
+                    duration.append(", ");
+                }
+                duration.append(hours).append(" hour").append(hours > 1 ? "s" : "");
+            }
+            
+            if (minutes > 0 || duration.length() > 0) {
+                if (duration.length() > 0) {
+                    duration.append(", ");
+                }
+                duration.append(minutes).append(" minute").append(minutes > 1 ? "s" : "");
+            }
+            
+            if (secs > 0 || duration.length() == 0) {
+                if (duration.length() > 0) {
+                    duration.append(", ");
+                }
+                duration.append(secs).append(" second").append(secs > 1 ? "s" : "");
+            }
+            
+            return duration.toString();
         }
 
         private Record buildRecord(RecordSender recordSender, ResultSet rs, String mandatoryEncoding) {
