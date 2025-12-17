@@ -407,6 +407,7 @@ public class TDengineReader extends Reader {
                             if (!StringUtils.isBlank(splitInterval) && !StringUtils.isBlank(startTime) && !StringUtils.isBlank(endTime)) {
                                 LOG.info("splitInterval is set to {}, will split time range {} - {} into batches. tbname count: {}", splitInterval, startTime, endTime, batchSubtables.size());
                                 List<String> timeRanges = splitDateTimeRange(startTime, endTime, splitInterval, reverseTime);
+                                LOG.info("splitDateTimeRange result: {}", timeRanges);
                                 for (String timeRange : timeRanges) {
                                     String[] times = timeRange.split(",");
                                     StringBuilder sb = new StringBuilder();
@@ -448,6 +449,7 @@ public class TDengineReader extends Reader {
                         if (!StringUtils.isBlank(splitInterval) && !StringUtils.isBlank(startTime) && !StringUtils.isBlank(endTime)) {
                             LOG.info("splitInterval is set to {}, will split time range {} - {} into batches.", splitInterval, startTime, endTime);
                             List<String> timeRanges = splitDateTimeRange(startTime, endTime, splitInterval, reverseTime);
+                            LOG.info("splitDateTimeRange result: {}", timeRanges);
                             for (String timeRange : timeRanges) {
                                 String[] times = timeRange.split(",");
                                 StringBuilder sb = new StringBuilder();

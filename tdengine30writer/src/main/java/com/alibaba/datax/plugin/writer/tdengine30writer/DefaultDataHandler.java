@@ -291,8 +291,9 @@ public class DefaultDataHandler implements DataHandler {
               }).collect(Collectors.joining(",", "(", ")")));
         }
         String sql = sb.toString();
-
+        
         try {
+            LOG.debug("sql: {}", sql); 
             return executeUpdate(conn, sql);
         } catch (SQLException e) {
             LOG.error("failed to writeBatchToSupTableBySQL, table: " + table + ", column meta: " + columnMetas +
@@ -312,6 +313,7 @@ public class DefaultDataHandler implements DataHandler {
 
     private String buildColumnValue(ColumnMeta colMeta, Record record) {
         Column column = record.getColumn(indexOf(colMeta.field));
+          
         TimestampPrecision timestampPrecision = schemaManager.loadDatabasePrecision();
         switch (column.getType()) {
             case DATE: {
