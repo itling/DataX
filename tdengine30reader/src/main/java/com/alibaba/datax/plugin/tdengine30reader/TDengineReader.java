@@ -6,6 +6,7 @@ import com.alibaba.datax.common.plugin.RecordSender;
 import com.alibaba.datax.common.spi.Reader;
 import com.alibaba.datax.common.util.Configuration;
 import com.alibaba.datax.plugin.writer.tdengine30writer.Key;
+import com.alibaba.datax.common.util.RetryUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,16 +16,28 @@ import java.sql.*;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
+/**
+ * TDengineReader is a DataX reader plugin that reads data from TDengine database.
+ * It supports reading from regular tables and super tables, with options for time range splitting
+ * and subtable batching for optimized performance.
+ */
 public class TDengineReader extends Reader {
 
     private static final String DATETIME_FORMAT = "yyyy-MM-dd HH:mm:ss";
 
+    /**
+     * Job class handles the configuration initialization, task splitting, and resource cleanup for TDengineReader.
+     */
     public static class Job extends Reader.Job {
         private static final Logger LOG = LoggerFactory.getLogger(Job.class);
         private Configuration originalConfig;
 
+        /**
+         * Initialize the job configuration, validate parameters, and set default values if not provided.
+         */
         @Override
         public void init() {
             this.originalConfig = super.getPluginJobConf();
@@ -95,11 +108,21 @@ public class TDengineReader extends Reader {
 
         }
 
+        /**
+         * Clean up resources after the job is completed.
+         */
         @Override
         public void destroy() {
 
         }
 
+        /**
+         * Split the job into multiple tasks based on the configuration.
+         * Each JDBC URL in the connection list becomes a separate task.
+         * 
+         * @param adviceNumber The advised number of tasks to split into (not used in this implementation)
+         * @return List of configurations for each split task
+         */
         @Override
         public List<Configuration> split(int adviceNumber) {
             List<Configuration> configurations = new ArrayList<>();
@@ -122,6 +145,10 @@ public class TDengineReader extends Reader {
         }
     }
 
+    /**
+     * Task class handles the actual data reading operation from TDengine database.
+     * It manages database connections, SQL execution, and data record construction.
+     */
     public static class Task extends Reader.Task {
         private static final Logger LOG = LoggerFactory.getLogger(Task.class);
 
@@ -138,7 +165,14 @@ public class TDengineReader extends Reader {
         private String splitInterval;
         private boolean reverseTime;
         private int splitSubtable;
+        private int retryTimes;
+        private int retryInterval;
+        private boolean exponentialRetry;
+        private List<Class<?>> retryExceptionClasses;
 
+        /**
+         * Static initializer to load TDengine JDBC drivers.
+         */
         static {
             try {
                 Class.forName("com.taosdata.jdbc.TSDBDriver");
@@ -173,8 +207,22 @@ public class TDengineReader extends Reader {
             this.splitInterval = readerSliceConfig.getString(Key.SPLIT_INTERVAL);
             this.reverseTime = readerSliceConfig.getBool(Key.REVERSE_TIME, false);
             this.splitSubtable = readerSliceConfig.getInt(Key.SPLIT_SUBTABLE, 0);
+            this.retryTimes = readerSliceConfig.getInt(Key.RETRY_TIMES,3);
+            this.retryInterval = readerSliceConfig.getInt(Key.RETRY_INTERVAL,1000);
+            this.exponentialRetry = readerSliceConfig.getBool(Key.EXPONENTIAL_RETRY, false);
+            // Initialize retry exception class list
+            List<String> defaultRetryExceptions = Arrays.asList(
+                    "java.sql.SQLException",
+                    "java.net.ConnectException",
+                    "com.taosdata.jdbc.TSDBDriverException"
+            );
+            this.retryExceptionClasses = loadRetryExceptionClasses(
+                    readerSliceConfig.getList(Key.RETRY_EXCEPTION_CLASSES, defaultRetryExceptions, String.class));
         }
 
+        /**
+         * Clean up resources after the task is completed, primarily closing the database connection.
+         */
         @Override
         public void destroy() {
             try {
@@ -185,6 +233,44 @@ public class TDengineReader extends Reader {
             }
         }
 
+        
+        /**
+         * Load configured retry exception classes (convert class name strings to Class objects)
+         * 
+         * @param exceptionClassNames List of exception class names (e.g., java.sql.SQLException)
+         * @return List of exception Class objects
+         */
+        private List<Class<?>> loadRetryExceptionClasses(List<String> exceptionClassNames) {
+            List<Class<?>> exceptionClasses = new ArrayList<>();
+            if (exceptionClassNames == null || exceptionClassNames.isEmpty()) {
+                return exceptionClasses;
+            }
+
+            for (String className : exceptionClassNames) {
+                try {
+                    // Load exception class
+                    Class<?> clazz = Class.forName(className);
+                    // Check if it's a subclass of Exception
+                    if (Exception.class.isAssignableFrom(clazz)) {
+                        exceptionClasses.add(clazz);
+                        LOG.info("Successfully loaded retry exception class: {}", className);
+                    } else {
+                        LOG.warn("The configured class {} is not a subclass of Exception, skipping loading", className);
+                    }
+                } catch (ClassNotFoundException e) {
+                    LOG.error("Failed to load retry exception class {}, skipping this class", className, e);
+                }
+            }
+            return exceptionClasses;
+        }
+
+        /**
+         * Parse the split interval string into milliseconds.
+         * Supported units: d(day), h(hour), m(minute), s(second)
+         * 
+         * @param interval The split interval string (e.g., "1h" for 1 hour)
+         * @return The interval in milliseconds
+         */
         private long parseSplitInterval(String interval) {
             if (StringUtils.isBlank(interval)) {
                 return 0;
@@ -208,25 +294,42 @@ public class TDengineReader extends Reader {
         }
 
         /**
-         * 从超级表中获取所有子表名称
-         * @param superTable 超级表名称
-         * @return 子表名称列表
+         * Get all subtable names from the super table
+         * 
+         * @param superTable Super table name
+         * @return List of subtable names
          */
         private List<String> getSubtableNames(String superTable) {
-            List<String> subtableNames = new ArrayList<>();
-            String sql = "select distinct tbname from " + superTable;
-            try (Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery(sql)) {
-                while (rs.next()) {
-                    subtableNames.add(rs.getString(1));
-                }
-            } catch (SQLException e) {
-                throw DataXException.asDataXException(TDengineReaderErrorCode.ILLEGAL_VALUE,
-                        "Failed to get subtable names from super table: " + superTable + " since: " + e.getMessage(), e);
+            try {
+                return RetryUtil.executeWithRetry(() -> {
+                    List<String> subtableNames = new ArrayList<>();
+                    String sql = "select distinct tbname from " + superTable;
+                    try (Statement stmt = conn.createStatement();
+                        ResultSet rs = stmt.executeQuery(sql)) {
+                        while (rs.next()) {
+                            subtableNames.add(rs.getString(1));
+                        }
+                    } catch (SQLException e) {
+                        throw DataXException.asDataXException(TDengineReaderErrorCode.ILLEGAL_VALUE,
+                                "Failed to get subtable names from super table: " + superTable + " since: " + e.getMessage(), e);
+                    }
+                    return subtableNames;
+                }, retryTimes, retryInterval, exponentialRetry, retryExceptionClasses);
+            } catch (Exception e) {
+                throw DataXException.asDataXException(TDengineReaderErrorCode.READER_SQL_EXECUTION_FAILED,
+                        "Failed to get subtable names, all retry attempts exhausted", e);
             }
-            return subtableNames;
         }
 
+        /**
+         * Split a datetime range into multiple smaller ranges based on the specified interval.
+         * 
+         * @param beginTime The start time of the range
+         * @param endTime The end time of the range
+         * @param splitInterval The interval to split the range by
+         * @param reverse Whether to split in reverse order (from endTime to beginTime)
+         * @return List of time ranges in the format "startTime,endTime"
+         */
         private List<String> splitDateTimeRange(String beginTime, String endTime, String splitInterval, boolean reverse) {
             List<String> timeRanges = new ArrayList<>();
             if (StringUtils.isBlank(beginTime) || StringUtils.isBlank(endTime) || StringUtils.isBlank(splitInterval)) {
@@ -274,27 +377,33 @@ public class TDengineReader extends Reader {
             return timeRanges;
         }
 
+        /**
+         * Start reading data from TDengine database and send records to the writer.
+         * This method handles SQL generation, execution, and record construction.
+         * 
+         * @param recordSender The RecordSender to send the constructed records
+         */
         @Override
         public void startRead(RecordSender recordSender) {
             List<String> sqlList = new ArrayList<>();
 
             if (querySql == null || querySql.isEmpty()) {
                 for (String table : tables) {
-                    // 如果设置了splitSubtable，则获取子表名称并分批生成SQL
+                    // If splitSubtable is set, get subtable names and generate SQL in batches
                     if (splitSubtable > 0) {
                         List<String> subtableNames = getSubtableNames(table);
-                        // 将子表名称分批，每批大小为splitSubtable
+                        // Batch subtable names, with each batch size being splitSubtable
                         LOG.info("splitSubtable is set to {}, will split {} subtable(s) into {} batch(es).", splitSubtable, subtableNames.size(), (subtableNames.size() + splitSubtable - 1) / splitSubtable);
                         for (int i = 0; i < subtableNames.size(); i += splitSubtable) {
                             int end = Math.min(i + splitSubtable, subtableNames.size());
                             List<String> batchSubtables = subtableNames.subList(i, end);
                             
-                            // 生成子表in条件
+                            // Generate subtable IN condition
                             StringBuilder inClause = new StringBuilder("tbname in ('");
                             inClause.append(StringUtils.join(batchSubtables, "','"));
                             inClause.append("')");
                             
-                            // 如果设置了splitInterval，则拆分时间范围
+                            // If splitInterval is set, split the time range
                             if (!StringUtils.isBlank(splitInterval) && !StringUtils.isBlank(startTime) && !StringUtils.isBlank(endTime)) {
                                 LOG.info("splitInterval is set to {}, will split time range {} - {} into batches. tbname count: {}", splitInterval, startTime, endTime, batchSubtables.size());
                                 List<String> timeRanges = splitDateTimeRange(startTime, endTime, splitInterval, reverseTime);
@@ -314,7 +423,7 @@ public class TDengineReader extends Reader {
                                 }
                             } else {
                                 LOG.info("splitInterval is not set, will query table {} directly with time range {} - {}. tbname count: {}", table, startTime, endTime, batchSubtables.size());
-                                // 不拆分时间范围
+                                // Don't split the time range
                                 StringBuilder sb = new StringBuilder();
                                 sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
                                 sb.append("where ").append(where);
@@ -334,8 +443,8 @@ public class TDengineReader extends Reader {
                         }
                     } else {
                         LOG.info("splitSubtable is not set, will query table {} directly.", table);
-                        // 不使用子表分批查询
-                        // 如果设置了splitInterval，则拆分时间范围
+                        // Don't use subtable batch query
+                        // If splitInterval is set, split the time range
                         if (!StringUtils.isBlank(splitInterval) && !StringUtils.isBlank(startTime) && !StringUtils.isBlank(endTime)) {
                             LOG.info("splitInterval is set to {}, will split time range {} - {} into batches.", splitInterval, startTime, endTime);
                             List<String> timeRanges = splitDateTimeRange(startTime, endTime, splitInterval, reverseTime);
@@ -354,7 +463,7 @@ public class TDengineReader extends Reader {
                             }
                         } else {
                             LOG.info("splitInterval is not set, will query table {} directly with time range {} - {}.", table, startTime, endTime);
-                            // 不拆分，使用原始时间范围
+                            // Don't split, use original time range
                             StringBuilder sb = new StringBuilder();
                             sb.append("select ").append(StringUtils.join(columns, ",")).append(" from ").append(table).append(" ");
                             sb.append("where ").append(where);
@@ -384,14 +493,23 @@ public class TDengineReader extends Reader {
             
             for (String sql : sqlList) {
                 long sqlStartTime = System.currentTimeMillis();
-                try (Statement stmt = conn.createStatement()) {
-                    ResultSet rs = stmt.executeQuery(sql);
-                    while (rs.next()) {
-                        Record record = buildRecord(recordSender, rs, mandatoryEncoding);
-                        recordSender.sendToWriter(record);
-                    }
-                } catch (SQLException e) {
-                    LOG.error(e.getMessage(), e);
+                try {
+                    RetryUtil.executeWithRetry(() -> {
+                        try (Statement stmt = conn.createStatement()) {
+                            ResultSet rs = stmt.executeQuery(sql);
+                            while (rs.next()) {
+                                Record record = buildRecord(recordSender, rs, mandatoryEncoding);
+                                recordSender.sendToWriter(record);
+                            }
+                        } catch (SQLException e) {
+                            LOG.error(e.getMessage(), e);
+                            throw e; 
+                        }
+                        return null; 
+                    }, retryTimes, retryInterval, exponentialRetry, retryExceptionClasses);
+                } catch (Exception e) {
+                    throw DataXException.asDataXException(TDengineReaderErrorCode.READER_SQL_EXECUTION_FAILED,
+                            "Failed to execute SQL, all retry attempts exhausted: " + sql, e);
                 }
                 
                 currentIndex++;
@@ -427,6 +545,7 @@ public class TDengineReader extends Reader {
 
         /**
          * Format seconds into a human-readable duration string (days, hours, minutes, seconds)
+         * 
          * @param seconds Total seconds to format
          * @return Formatted duration string
          */
@@ -470,6 +589,14 @@ public class TDengineReader extends Reader {
             return duration.toString();
         }
 
+        /**
+         * Build a DataX Record from a ResultSet row.
+         * 
+         * @param recordSender The RecordSender to create the record
+         * @param rs The ResultSet containing the row data
+         * @param mandatoryEncoding The encoding to use for string columns (if specified)
+         * @return The built Record object
+         */
         private Record buildRecord(RecordSender recordSender, ResultSet rs, String mandatoryEncoding) {
             Record record = recordSender.createRecord();
             try {
@@ -509,9 +636,9 @@ public class TDengineReader extends Reader {
                     }
                 }
             } catch (SQLException e) {
-                throw DataXException.asDataXException(TDengineReaderErrorCode.ILLEGAL_VALUE, "database query error！", e);
+                throw DataXException.asDataXException(TDengineReaderErrorCode.ILLEGAL_VALUE, "Database query error!", e);
             } catch (UnsupportedEncodingException e) {
-                throw DataXException.asDataXException(TDengineReaderErrorCode.ILLEGAL_VALUE, "illegal mandatoryEncoding", e);
+                throw DataXException.asDataXException(TDengineReaderErrorCode.ILLEGAL_VALUE, "Illegal mandatory encoding", e);
             }
             return record;
         }

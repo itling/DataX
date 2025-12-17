@@ -7,7 +7,8 @@ public enum TDengineReaderErrorCode implements ErrorCode {
     REQUIRED_VALUE("TDengineReader-00", "parameter value is missing"),
     ILLEGAL_VALUE("TDengineReader-01", "invalid parameter value"),
     CONNECTION_FAILED("TDengineReader-02", "connection error"),
-    RUNTIME_EXCEPTION("TDengineWriter-03", "runtime exception");
+    RUNTIME_EXCEPTION("TDengineWriter-03", "runtime exception"),
+    READER_SQL_EXECUTION_FAILED("TDengineReader-04", "sql execution failed");
 
     private final String code;
     private final String description;

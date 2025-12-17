@@ -6,6 +6,7 @@ import com.alibaba.datax.plugin.writer.tdengine30writer.Key;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.util.Arrays;
 import java.util.List;
 
 public class TDengineReaderTest {
@@ -198,6 +199,119 @@ public class TDengineReaderTest {
         Configuration conf = task.getPluginJobConf();
         // 默认值应为0
         Assert.assertEquals(0, conf.getInt("splitSubtable", 0).intValue());
+    }
+
+    @Test
+    public void taskInit_retryParameters_case01() {
+        // given
+        TDengineReader.Task task = new TDengineReader.Task();
+        Configuration configuration = Configuration.from("{" +
+                "\"username\": \"root\"," +
+                "\"password\": \"taosdata\"," +
+                "\"jdbcUrl\": \"jdbc:TAOS-RS://master:6041/vehicle_dev\"," +
+                "\"table\": [\"pvt\"]," +
+                "\"column\": [\"ts\",\"temperature\",\"pressure\",\"speed\"]," +
+                "\"where\":\"_c0 > 0\"" +
+                "}");
+        task.setPluginJobConf(configuration);
+
+        // when
+        task.init();
+
+        // assert
+        // 验证默认值
+        Assert.assertEquals(3, configuration.getInt(Key.RETRY_TIMES, 0).intValue());
+        Assert.assertEquals(1000, configuration.getInt(Key.RETRY_INTERVAL, 0).intValue());
+        Assert.assertEquals(false, configuration.getBool(Key.EXPONENTIAL_RETRY, true));
+    }
+
+    @Test
+    public void taskInit_retryParameters_case02() {
+        // given
+        TDengineReader.Task task = new TDengineReader.Task();
+        Configuration configuration = Configuration.from("{" +
+                "\"username\": \"root\"," +
+                "\"password\": \"taosdata\"," +
+                "\"jdbcUrl\": \"jdbc:TAOS-RS://master:6041/vehicle_dev\"," +
+                "\"table\": [\"pvt\"]," +
+                "\"column\": [\"ts\",\"temperature\",\"pressure\",\"speed\"]," +
+                "\"where\":\"_c0 > 0\"," +
+                "\"retryTimes\": 5," +
+                "\"retryInterval\": 2000," +
+                "\"exponentialRetry\": true" +
+                "}");
+        task.setPluginJobConf(configuration);
+
+        // when
+        task.init();
+
+        // assert
+        // 验证配置值
+        Assert.assertEquals(5, configuration.getInt(Key.RETRY_TIMES, 0).intValue());
+        Assert.assertEquals(2000, configuration.getInt(Key.RETRY_INTERVAL, 0).intValue());
+        Assert.assertEquals(true, configuration.getBool(Key.EXPONENTIAL_RETRY, false));
+    }
+
+    @Test
+    public void taskInit_retryExceptionClasses_case01() {
+        // given
+        TDengineReader.Task task = new TDengineReader.Task();
+        Configuration configuration = Configuration.from("{" +
+                "\"username\": \"root\"," +
+                "\"password\": \"taosdata\"," +
+                "\"jdbcUrl\": \"jdbc:TAOS-RS://master:6041/vehicle_dev\"," +
+                "\"table\": [\"pvt\"]," +
+                "\"column\": [\"ts\",\"temperature\",\"pressure\",\"speed\"]," +
+                "\"where\":\"_c0 > 0\"" +
+                "}");
+        task.setPluginJobConf(configuration);
+
+        // when
+        task.init();
+
+        // assert
+        // 验证默认异常类列表配置
+        List<String> defaultExceptions = Arrays.asList(
+                "java.sql.SQLException",
+                "java.net.ConnectException",
+                "com.taosdata.jdbc.TSDBDriverException"
+        );
+        List<String> configuredExceptions = configuration.getList(Key.RETRY_EXCEPTION_CLASSES, String.class);
+        Assert.assertEquals(defaultExceptions.size(), configuredExceptions.size());
+        for (String exception : defaultExceptions) {
+            Assert.assertTrue(configuredExceptions.contains(exception));
+        }
+    }
+
+    @Test
+    public void taskInit_retryExceptionClasses_case02() {
+        // given
+        TDengineReader.Task task = new TDengineReader.Task();
+        Configuration configuration = Configuration.from("{" +
+                "\"username\": \"root\"," +
+                "\"password\": \"taosdata\"," +
+                "\"jdbcUrl\": \"jdbc:TAOS-RS://master:6041/vehicle_dev\"," +
+                "\"table\": [\"pvt\"]," +
+                "\"column\": [\"ts\",\"temperature\",\"pressure\",\"speed\"]," +
+                "\"where\":\"_c0 > 0\"," +
+                "\"retryExceptionClasses\": [\"java.sql.SQLException\",\"java.io.IOException\"]" +
+                "}");
+        task.setPluginJobConf(configuration);
+
+        // when
+        task.init();
+
+        // assert
+        // 验证自定义异常类列表配置
+        List<String> expectedExceptions = Arrays.asList(
+                "java.sql.SQLException",
+                "java.io.IOException"
+        );
+        List<String> configuredExceptions = configuration.getList(Key.RETRY_EXCEPTION_CLASSES, String.class);
+        Assert.assertEquals(expectedExceptions.size(), configuredExceptions.size());
+        for (String exception : expectedExceptions) {
+            Assert.assertTrue(configuredExceptions.contains(exception));
+        }
     }
 
 }
