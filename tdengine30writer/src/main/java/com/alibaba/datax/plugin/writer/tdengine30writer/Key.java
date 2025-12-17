@@ -18,4 +18,8 @@ public class Key {
     public static final String SPLIT_INTERVAL = "splitInterval";
     public static final String REVERSE_TIME = "reverseTime";
     public static final String SPLIT_SUBTABLE = "splitSubtable";
+    public static final String RETRY_TIMES = "retryTimes";
+    public static final String RETRY_INTERVAL = "retryInterval";
+    public static final String EXPONENTIAL_RETRY = "exponentialRetry";
+    public static final String RETRY_EXCEPTION_CLASSES = "retryExceptionClasses"; 
 }
