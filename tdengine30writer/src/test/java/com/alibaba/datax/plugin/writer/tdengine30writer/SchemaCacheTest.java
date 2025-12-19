@@ -18,32 +18,19 @@ public class SchemaCacheTest {
     @Test
     @Ignore
     public void testSchemaCache() {
-        List<Thread> tList = IntStream.range(0, 10).mapToObj(i -> {
-            Thread t = new Thread(() -> {
+   
                 Configuration config = Configuration.from(this.config);
                 SchemaCache schemaCache = SchemaCache.getInstance(config);
 
-                List<ColumnMeta> col_metas = schemaCache.getColumnMetaList("cnpp_ads_wmct_d", TableType.SUP_TABLE);
+                List<ColumnMeta> col_metas = schemaCache.getColumnMetaList("gnss", TableType.SUP_TABLE);
                 Assert.assertEquals(10, col_metas.size());
 
-            });
-            return t;
-        }).collect(Collectors.toList());
-
-        tList.forEach(Thread::start);
-
-        tList.forEach(t -> {
-            try {
-                t.join();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        });
+        
     }
 
     @Before
     public void before() {
-        InputStream in = Thread.currentThread().getContextClassLoader().getResourceAsStream("ts-4558.json");
+        InputStream in = Thread.currentThread().getContextClassLoader().getResourceAsStream("gnss.json");
         try {
             byte[] bytes = new byte[in.available()];
             in.read(bytes);

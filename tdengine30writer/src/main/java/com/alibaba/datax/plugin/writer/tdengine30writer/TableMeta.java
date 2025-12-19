@@ -1,12 +1,12 @@
 package com.alibaba.datax.plugin.writer.tdengine30writer;
 
 public class TableMeta {
-    TableType tableType;
-    String tbname;
-    int columns;
-    int tags;
-    int tables;
-    String stable_name;
+    public TableType tableType;
+    public String tbname;
+    public int columns;
+    public int tags;
+    public int tables;
+    public String stable_name;
 
     @Override
     public String toString() {

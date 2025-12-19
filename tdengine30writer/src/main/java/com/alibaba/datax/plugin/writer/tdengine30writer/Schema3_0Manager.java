@@ -95,7 +95,7 @@ public class Schema3_0Manager extends SchemaManager {
         tableMeta.columns = rs.getInt(Constants.TABLE_META_COLUMNS);
         tableMeta.tags = rs.getInt(Constants.TABLE_META_TAGS);
         //        tableMeta.tables = rs.getInt("tables"); // 直接从 ins_stables 查不到子表数量
-        LOG.debug("load table metadata of " + tableMeta.tbname + ": " + tableMeta);
+        LOG.info("load table metadata of " + tableMeta.tbname + ": " + tableMeta);
         return tableMeta;
     }
 
@@ -107,7 +107,7 @@ public class Schema3_0Manager extends SchemaManager {
         tableMeta.tbname = rs.getString(Constants.TABLE_META_TABLE_NAME);
         tableMeta.columns = rs.getInt(Constants.TABLE_META_COLUMNS);
         tableMeta.stable_name = StringUtils.isBlank(stable_name) ? null : stable_name;
-        LOG.debug("load table metadata of " + tableMeta.tbname + ": " + tableMeta);
+        LOG.info("load table metadata of " + tableMeta.tbname + ": " + tableMeta);
         return tableMeta;
     }
 

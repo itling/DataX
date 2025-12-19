@@ -11,6 +11,8 @@ import com.taosdata.jdbc.enums.SchemalessProtocolType;
 import com.taosdata.jdbc.enums.SchemalessTimestampType;
 import com.taosdata.jdbc.utils.StringUtils;
 import com.taosdata.jdbc.utils.Utils;
+import com.taosdata.jdbc.utils.DateTimeUtils;
+import com.alibaba.fastjson2.JSON;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +29,7 @@ public class DefaultDataHandler implements DataHandler {
         try {
             Class.forName("com.taosdata.jdbc.TSDBDriver");
             Class.forName("com.taosdata.jdbc.rs.RestfulDriver");
+            Class.forName("com.taosdata.jdbc.ws.WebSocketDriver");
         } catch (ClassNotFoundException e) {
             LOG.error(e.getMessage(), e);
         }
@@ -64,6 +67,7 @@ public class DefaultDataHandler implements DataHandler {
         this.taskPluginCollector = taskPluginCollector;
 
         this.schemaCache = SchemaCache.getInstance(configuration);
+        LOG.info("this.schemaCache: {}", JSON.toJSONString(this.schemaCache.toString()));
     }
 
     @Override
@@ -264,7 +268,6 @@ public class DefaultDataHandler implements DataHandler {
      */
     private int writeBatchToSupTableBySQL(Connection conn, String table, List<Record> recordBatch) throws SQLException {
         List<ColumnMeta> columnMetas = this.schemaCache.getColumnMetaList(table, TableType.SUP_TABLE);
-
         StringBuilder sb = new StringBuilder("insert into");
         for (Record record : recordBatch) {
             sb.append(" `")
@@ -401,7 +404,8 @@ public class DefaultDataHandler implements DataHandler {
                         sb.append(time);
                 }
             } else if (column.getType() == Column.Type.STRING) {
-                sb.append(Utils.parseTimestamp(column.asString()));
+                //sb.append(Utils.parseTimestamp(column.asString()));
+                sb.append(DateTimeUtils.parseTimestamp(column.asString(),null));
             } else {
                 sb.append(column.asLong());
             }

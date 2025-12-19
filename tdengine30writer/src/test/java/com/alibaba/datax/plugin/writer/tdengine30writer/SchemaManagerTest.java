@@ -1,13 +1,15 @@
 package com.alibaba.datax.plugin.writer.tdengine30writer;
 
 import com.alibaba.datax.plugin.writer.tdengine30writer.ColumnMeta;
-import com.alibaba.datax.plugin.writer.tdengine30writer.SchemaManager;
+import com.alibaba.datax.plugin.writer.tdengine30writer.Schema3_0Manager;
 import com.alibaba.datax.plugin.writer.tdengine30writer.TableMeta;
 import com.alibaba.datax.plugin.writer.tdengine30writer.TableType;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -19,12 +21,13 @@ import java.util.Map;
 
 public class SchemaManagerTest {
 
+    private static final Logger LOG = LoggerFactory.getLogger(SchemaManagerTest.class);
     private static Connection conn;
 
     @Test
     public void loadTableMeta() throws SQLException {
         // given
-        SchemaManager schemaManager = new SchemaManager(conn);
+        Schema3_0Manager schemaManager = new Schema3_0Manager(conn,"scm_test");
         List<String> tables = Arrays.asList("stb1", "stb2", "tb1", "tb3", "weather");
 
         // when
@@ -83,22 +86,27 @@ public class SchemaManagerTest {
     }
 
     @BeforeClass
-    public static void beforeClass() throws SQLException {
-        conn = DriverManager.getConnection("jdbc:TAOS-RS://192.168.56.105:6041", "root", "taosdata");
-        try (Statement stmt = conn.createStatement()) {
-            stmt.execute("drop database if exists scm_test");
-            stmt.execute("create database if not exists scm_test");
-            stmt.execute("use scm_test");
-            stmt.execute("create table stb1(ts timestamp, f1 int, f2 int) tags(t1 int)");
-            stmt.execute("create table stb2(ts timestamp, f1 int, f2 int, f3 int) tags(t1 int, t2 int)");
-            stmt.execute("insert into tb1 using stb1 tags(1) values(now, 1, 2)");
-            stmt.execute("insert into tb2 using stb1 tags(2) values(now, 1, 2)");
-            stmt.execute("insert into tb3 using stb2 tags(1,1) values(now, 1, 2, 3)");
-            stmt.execute("insert into tb4 using stb2 tags(2,2) values(now, 1, 2, 3)");
-            stmt.execute("create table weather(ts timestamp, f1 int, f2 int, f3 int, t1 int, t2 int)");
-            stmt.execute("create table stb3(ts timestamp, f1 int) tags(t1 int, t2 float, t3 nchar(32))");
-            stmt.execute("insert into tb5 using stb3 tags(1,1.1,'abc') values(now, 1)");
-            stmt.execute("insert into tb6 using stb3 tags(2,2.2,'defg') values(now, 2)");
+    public static void beforeClass() {
+        try {
+            conn = DriverManager.getConnection("jdbc:TAOS-RS://10.113.0.101:6041", "timp", "timp1234");
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("drop database if exists scm_test");
+                stmt.execute("create database if not exists scm_test");
+                stmt.execute("use scm_test");
+                stmt.execute("create table stb1(ts timestamp, f1 int, f2 int) tags(t1 int)");
+                stmt.execute("create table stb2(ts timestamp, f1 int, f2 int, f3 int) tags(t1 int, t2 int)");
+                stmt.execute("insert into tb1 using stb1 tags(1) values(now, 1, 2)");
+                stmt.execute("insert into tb2 using stb1 tags(2) values(now, 1, 2)");
+                stmt.execute("insert into tb3 using stb2 tags(1,1) values(now, 1, 2, 3)");
+                stmt.execute("insert into tb4 using stb2 tags(2,2) values(now, 1, 2, 3)");
+                stmt.execute("create table weather(ts timestamp, f1 int, f2 int, f3 int, t1 int, t2 int)");
+                stmt.execute("create table stb3(ts timestamp, f1 int) tags(t1 int, t2 float, t3 nchar(32))");
+                stmt.execute("insert into tb5 using stb3 tags(1,1.1,'abc') values(now, 1)");
+                stmt.execute("insert into tb6 using stb3 tags(2,2.2,'defg') values(now, 2)");
+            }
+        } catch (SQLException e) {
+            LOG.error("beforeClass failed: ", e);
+            throw new RuntimeException("beforeClass failed", e);
         }
     }
 

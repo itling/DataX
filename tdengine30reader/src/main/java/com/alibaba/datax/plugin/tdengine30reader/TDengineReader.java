@@ -177,6 +177,7 @@ public class TDengineReader extends Reader {
             try {
                 Class.forName("com.taosdata.jdbc.TSDBDriver");
                 Class.forName("com.taosdata.jdbc.rs.RestfulDriver");
+                Class.forName("com.taosdata.jdbc.ws.WebSocketDriver");
             } catch (ClassNotFoundException ignored) {
                 LOG.warn(ignored.getMessage(), ignored);
             }
@@ -609,6 +610,7 @@ public class TDengineReader extends Reader {
                         case Types.SMALLINT:
                         case Types.TINYINT:
                         case Types.INTEGER:
+                        case Types.NUMERIC:
                         case Types.BIGINT:
                             record.addColumn(new LongColumn(rs.getString(i)));
                             break;
