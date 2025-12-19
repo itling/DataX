@@ -177,6 +177,8 @@ public class TDengineReader extends Reader {
             try {
                 Class.forName("com.taosdata.jdbc.TSDBDriver");
                 Class.forName("com.taosdata.jdbc.rs.RestfulDriver");
+                Class.forName("com.taosdata.jdbc.ws.WebSocketDriver");
+
             } catch (ClassNotFoundException ignored) {
                 LOG.warn(ignored.getMessage(), ignored);
             }
@@ -213,8 +215,7 @@ public class TDengineReader extends Reader {
             // Initialize retry exception class list
             List<String> defaultRetryExceptions = Arrays.asList(
                     "java.sql.SQLException",
-                    "java.net.ConnectException",
-                    "com.taosdata.jdbc.TSDBDriverException"
+                    "java.net.ConnectException"
             );
             this.retryExceptionClasses = loadRetryExceptionClasses(
                     readerSliceConfig.getList(Key.RETRY_EXCEPTION_CLASSES, defaultRetryExceptions, String.class));
@@ -609,11 +610,13 @@ public class TDengineReader extends Reader {
                         case Types.SMALLINT:
                         case Types.TINYINT:
                         case Types.INTEGER:
+                        case Types.NUMERIC:
                         case Types.BIGINT:
                             record.addColumn(new LongColumn(rs.getString(i)));
                             break;
                         case Types.FLOAT:
                         case Types.DOUBLE:
+                        case Types.DECIMAL:
                             record.addColumn(new DoubleColumn(rs.getString(i)));
                             break;
                         case Types.BOOLEAN:
@@ -623,6 +626,7 @@ public class TDengineReader extends Reader {
                             record.addColumn(new DateColumn(rs.getTimestamp(i)));
                             break;
                         case Types.BINARY:
+                        case Types.LONGNVARCHAR:
                         case Types.VARCHAR:
                             record.addColumn(new BytesColumn(rs.getBytes(i)));
                             break;

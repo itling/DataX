@@ -11,6 +11,7 @@ import com.taosdata.jdbc.enums.SchemalessProtocolType;
 import com.taosdata.jdbc.enums.SchemalessTimestampType;
 import com.taosdata.jdbc.utils.StringUtils;
 import com.taosdata.jdbc.utils.Utils;
+import com.taosdata.jdbc.utils.DateTimeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +28,7 @@ public class DefaultDataHandler implements DataHandler {
         try {
             Class.forName("com.taosdata.jdbc.TSDBDriver");
             Class.forName("com.taosdata.jdbc.rs.RestfulDriver");
+            Class.forName("com.taosdata.jdbc.ws.WebSocketDriver");
         } catch (ClassNotFoundException e) {
             LOG.error(e.getMessage(), e);
         }
@@ -45,8 +47,7 @@ public class DefaultDataHandler implements DataHandler {
     private SchemaManager schemaManager;
     private final SchemaCache schemaCache;
 
-    //private Map<String, TableMeta> tableMetas;
-    private Map<String, List<ColumnMeta>> tbnameColumnMetasMap;
+
 
     public void setSchemaManager(SchemaManager schemaManager) {
         this.schemaManager = schemaManager;
@@ -64,6 +65,7 @@ public class DefaultDataHandler implements DataHandler {
         this.taskPluginCollector = taskPluginCollector;
 
         this.schemaCache = SchemaCache.getInstance(configuration);
+        LOG.info("SchemaCache initialized: tableMetas={}", SchemaCache.getTableMetas());
     }
 
     @Override
@@ -240,9 +242,13 @@ public class DefaultDataHandler implements DataHandler {
                 try {
                     switch (columnMeta.type) {
                         case "TINYINT":
+                        case "TINYINT UNSIGNED":
                         case "SMALLINT":
+                        case "SMALLINT UNSIGNED":
                         case "INT":
+                        case "INT UNSIGNED":
                         case "BIGINT":
+                        case "BIGINT UNSIGNED":
                             return column.asLong().toString();
                         default:
                             return column.asString();
@@ -401,7 +407,8 @@ public class DefaultDataHandler implements DataHandler {
                         sb.append(time);
                 }
             } else if (column.getType() == Column.Type.STRING) {
-                sb.append(Utils.parseTimestamp(column.asString()));
+                //sb.append(Utils.parseTimestamp(column.asString()));
+                sb.append(DateTimeUtils.parseTimestamp(column.asString(),null));
             } else {
                 sb.append(column.asLong());
             }

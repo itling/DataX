@@ -31,6 +31,7 @@ public class Constants {
     public static final String COLUMN_META_NOTE = "note";
 
     public static final String COLUMN_META_NOTE_TAG = "TAG";
+    public static final String COLUMN_META_NOTE_COMPOSITE_KEY = "COMPOSITE KEY";
 
     // ----------------- database meta -------------------
     public static final String DATABASE_META_PRECISION = "precision";

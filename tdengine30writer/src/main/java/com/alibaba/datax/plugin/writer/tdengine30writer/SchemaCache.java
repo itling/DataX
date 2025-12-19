@@ -71,6 +71,11 @@ public final class SchemaCache {
         }
         return instance;
     }
+    
+    public static Map<String, TableMeta> getTableMetas() {
+        return tableMetas;
+    }
+
 
     public TableMeta getTableMeta(String table_name) {
         if (!tableMetas.containsKey(table_name)) {
@@ -156,6 +161,10 @@ public final class SchemaCache {
         columnMeta.isTag = Constants.COLUMN_META_NOTE_TAG.equals(columnMeta.note);
         // columnMeta.isPrimaryKey = "ts".equals(columnMeta.field);
         columnMeta.isPrimaryKey = isPrimaryKey;
+        if (Constants.COLUMN_META_NOTE_COMPOSITE_KEY.equals(columnMeta.note)){
+            columnMeta.isPrimaryKey = true;
+        }
+
         return columnMeta;
     }
 
