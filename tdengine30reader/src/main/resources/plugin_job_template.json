@@ -18,6 +18,13 @@
     ],
     "beginDateTime": "",
     "endDateTime": "",
-    "where": ""
+    "where": "",
+    "splitInterval": "",
+    "reverseTime": false,
+    "splitSubtable": 0,
+    "retryTimes": 3,
+    "retryInterval": 1,
+    "exponentialRetry": true,
+    "retryExceptionClasses": ["java.sql.SQLException"]
   }
 }
